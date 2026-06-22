@@ -80,6 +80,16 @@ runs:
           fi
 
           cp -rp ./Anykernel3/* tmp
+
+          # Include repacked vendor_boot for AK3 to flash directly  ← جديد
+          # AnyKernel3 flashes files named "vendor_boot" (no extension)
+          # as a raw image to the vendor_boot partition automatically.
+          if [[ "${{ env.VENDOR_BOOT_REPACK_ENABLE }}" == "true" ]] && \
+             [[ -f "${{ env.VENDOR_BOOT_IMAGE }}" ]]; then
+            cp "${{ env.VENDOR_BOOT_IMAGE }}" tmp/vendor_boot
+            echo "[+] vendor_boot included in AK3 package."
+          fi
+
           cd tmp
           7za a -mx9 tmp.zip *
           cd ..
