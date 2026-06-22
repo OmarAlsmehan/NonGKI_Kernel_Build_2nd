@@ -97,6 +97,11 @@ runs:
           # Copy Shell
           cp /tmp/Bin/found_gcc.sh ./
 
+          # Move firmwares to tmp                            ← السطر الجديد
+          [[ -d "$GITHUB_WORKSPACE/Firmwares" ]] && \
+            mv "$GITHUB_WORKSPACE/Firmwares" /tmp/Firmwares && \
+            echo "[+] Firmwares moved to /tmp/Firmwares."
+
       - name: Install necessary packages
         shell: bash
         run: |

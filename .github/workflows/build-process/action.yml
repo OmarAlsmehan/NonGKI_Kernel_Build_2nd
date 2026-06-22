@@ -113,6 +113,15 @@ runs:
             fi
           fi
 
+          # ── Kernel Release ────────────────────────────────────────────────
+          # Runs AFTER all config steps (.config fully resolved) so
+          # CONFIG_LOCALVERSION and any merged fragments are included.
+          KERNEL_RELEASE=$(make -s O=out ARCH="${{ env.KERNEL_ARCH }}" kernelrelease 2>/dev/null) \
+              || KERNEL_RELEASE="unknown"
+          echo "==============================="
+          echo "= Kernel name is $KERNEL_RELEASE"
+          echo "==============================="
+
           if [[ "$BUILD_CLANG" == "true" ]]; then
             echo "======================"
             echo "=Execuate Clang Build="

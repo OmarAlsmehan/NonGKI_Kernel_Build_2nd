@@ -80,6 +80,14 @@ runs:
           fi
 
           cp -rp ./Anykernel3/* tmp
+           
+           # adding vendor_boot to ak3 file
+          if [[ "${{ env.VENDOR_BOOT_REPACK_ENABLE }}" == "true" ]] && \
+             [[ -f "${{ env.VENDOR_BOOT_IMAGE }}" ]]; then
+            cp "${{ env.VENDOR_BOOT_IMAGE }}" tmp/vendor_boot.img
+            echo "[+] vendor_boot included in AK3 package."
+          fi
+
           cd tmp
           7za a -mx9 tmp.zip *
           cd ..

@@ -1,0 +1,417 @@
+name: 'Repack vendor_boot.img with Kernel Modules & Firmware.'
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Required env variables (set in your device's build-<device>.yml):
+#
+#  VENDOR_BOOT_REPACK_ENABLE  : true / false          — master switch
+#  VENDOR_BOOT_SOURCE         : <url>                 — stock vendor_boot.img
+#                                Supports: .img  .lz4  .tar  .tar.lz4  .zip
+#  VENDOR_BOOT_SOC            : qcom / mediatek       — SoC family (reserved
+#                                for future conditional logic; set it now)
+#  VENDOR_BOOT_DTB_REPLACE    : true / false          — replace DTB section
+#  VENDOR_BOOT_FSTAB_MULTIFS  : true / false          — rewrite fstab to
+#                                accept erofs + ext4 + f2fs simultaneously
+#  VENDOR_BOOT_MODULES_INJECT : true / false          — inject compiled .ko
+#  VENDOR_BOOT_FIRMWARE_ENABLE: true / false          — inject pre-compiled
+#                                firmware from Firmwares/<DEVICE_CODENAME>/
+#
+#  Notes:
+#   • Samsung SRP board-name fix is auto-detected from the header; no extra var.
+#   • Firmware path inside ramdisk mirrors Firmwares/<codename>/ structure:
+#       Firmwares/a73xq/tsp_synaptics/s3908_a73xq_boe.bin
+#       → ramdisk: lib/firmware/tsp_synaptics/s3908_a73xq_boe.bin
+#   • BUILD_DEBUGGER=true also injects androidboot.selinux=permissive.
+#   • Exports VENDOR_BOOT_IMAGE (absolute path) for pack-process to consume.
+#
+#  One-time repo changes required (see bottom of this file for snippets):
+#   1. build-env/action.yml  — add one line to move Firmwares/ to /tmp/
+#   2. pack-process/action.yml — add vendor_boot copy into AK3 ZIP
+# ─────────────────────────────────────────────────────────────────────────────
+
+runs:
+  using: 'composite'
+  steps:
+
+      - name: Get magiskboot & avbtool
+        if: env.VENDOR_BOOT_REPACK_ENABLE == 'true'
+        shell: bash
+        run: |
+          # ── lz4 (for .tar.lz4 Samsung/OEM firmware packages) ─────────────
+          command -v lz4 >/dev/null 2>&1 || sudo apt-get install -y -q lz4
+
+          # ── magiskboot ────────────────────────────────────────────────────
+          # Static x86_64 binary extracted from lib/x86_64/libmagiskboot.so
+          # inside the latest Magisk release APK. No install required.
+          echo "[*] Fetching magiskboot..."
+          MAGISK_APK_URL=$(curl -fsSL \
+            https://api.github.com/repos/topjohnwu/Magisk/releases/latest \
+            | grep '"browser_download_url"' \
+            | grep '\.apk"' \
+            | grep -v 'stub' \
+            | head -1 \
+            | cut -d'"' -f4)
+
+          ${{ env.CURLX }} "$MAGISK_APK_URL" /tmp/Magisk.apk
+          unzip -p /tmp/Magisk.apk lib/x86_64/libmagiskboot.so > /tmp/magiskboot
+          chmod +x /tmp/magiskboot
+          rm -f /tmp/Magisk.apk
+          /tmp/magiskboot --help 2>&1 | head -2 || true
+          echo "MAGISKBOOT=/tmp/magiskboot" >> $GITHUB_ENV
+          echo "[+] magiskboot ready."
+
+          # ── avbtool ───────────────────────────────────────────────────────
+          # Fetched from AOSP (googlesource returns base64 with ?format=TEXT).
+          # erase_footer only uses stdlib — no pip dependencies needed.
+          echo "[*] Fetching avbtool..."
+          ${{ env.CURLX }} \
+            "https://android.googlesource.com/platform/external/avb/+/refs/heads/main/avbtool.py?format=TEXT" \
+            /tmp/avbtool.b64
+          base64 -d /tmp/avbtool.b64 > /tmp/avbtool.py
+          chmod +x /tmp/avbtool.py
+          rm -f /tmp/avbtool.b64
+          echo "AVBTOOL=python3 /tmp/avbtool.py" >> $GITHUB_ENV
+          echo "[+] avbtool ready."
+
+      - name: Download Stock vendor_boot.img
+        if: env.VENDOR_BOOT_REPACK_ENABLE == 'true'
+        shell: bash
+        run: |
+          SRC="${{ env.VENDOR_BOOT_SOURCE }}"
+          STOCK="$GITHUB_WORKSPACE/vendor_boot_stock_${{ env.DEVICE_CODENAME }}.img"
+
+          echo "[*] Downloading: $(basename "$SRC")"
+
+          if   [[ "$SRC" == *.tar.lz4 ]]; then
+            ${{ env.CURLX }} "$SRC" /tmp/vb_pkg.tar.lz4
+            lz4cat /tmp/vb_pkg.tar.lz4 | tar -x --wildcards "*/vendor_boot.img" -O > "$STOCK"
+            rm -f /tmp/vb_pkg.tar.lz4
+
+          elif [[ "$SRC" == *.tar ]]; then
+            ${{ env.CURLX }} "$SRC" /tmp/vb_pkg.tar
+            tar -xf /tmp/vb_pkg.tar --wildcards "*/vendor_boot.img" -O > "$STOCK"
+            rm -f /tmp/vb_pkg.tar
+
+          elif [[ "$SRC" == *.zip ]]; then
+            ${{ env.CURLX }} "$SRC" /tmp/vb_pkg.zip
+            unzip -p /tmp/vb_pkg.zip "*/vendor_boot.img" > "$STOCK" 2>/dev/null || \
+            unzip -p /tmp/vb_pkg.zip "vendor_boot.img"   > "$STOCK"
+            rm -f /tmp/vb_pkg.zip
+
+          elif [[ "$SRC" == *.lz4 ]]; then
+            ${{ env.CURLX }} "$SRC" /tmp/vb_pkg.img.lz4
+            lz4cat /tmp/vb_pkg.img.lz4 > "$STOCK"
+            rm -f /tmp/vb_pkg.img.lz4
+
+          else
+            ${{ env.CURLX }} "$SRC" "$STOCK"
+          fi
+
+          [[ -s "$STOCK" ]] || { echo "[✗] Download failed or image is empty!"; exit 1; }
+          echo "VENDOR_BOOT_STOCK=$STOCK" >> $GITHUB_ENV
+          echo "[+] Stock vendor_boot.img: $(du -h "$STOCK" | cut -f1)"
+
+      - name: Repack vendor_boot.img
+        if: env.VENDOR_BOOT_REPACK_ENABLE == 'true'
+        shell: bash
+        run: |
+          MAGISKBOOT="${{ env.MAGISKBOOT }}"
+          AVBTOOL="${{ env.AVBTOOL }}"
+          STOCK="${{ env.VENDOR_BOOT_STOCK }}"
+          IMAGE_DIR="$GITHUB_WORKSPACE/device_kernel/out/arch/${{ env.KERNEL_ARCH }}/boot"
+          OUT="$GITHUB_WORKSPACE/vendor_boot_${{ env.DEVICE_CODENAME }}.img"
+          WORK="$GITHUB_WORKSPACE/.vb_work"
+
+          # ── Workspace ─────────────────────────────────────────────────────
+          rm -rf "$WORK" && mkdir -p "$WORK"
+          cp "$STOCK" "$WORK/vendor_boot.img"
+          cd "$WORK"
+
+          # ── Erase AVB footer ──────────────────────────────────────────────
+          # Must happen before any modification; silently skipped if absent.
+          $AVBTOOL erase_footer --image vendor_boot.img 2>/dev/null || \
+            echo "[!] No AVB footer found — image already clean."
+
+          # ── Unpack ────────────────────────────────────────────────────────
+          # -h dumps header to file so repack preserves original header values.
+          # || true is intentional: magiskboot returns exit code 3 on vendor_boot
+          # images even on full success (it signals "non-standard image" internally).
+          # We verify success by checking ramdisk.cpio was actually extracted.
+          $MAGISKBOOT unpack -h vendor_boot.img || true
+          [[ -f ramdisk.cpio ]] || {
+            echo "[✗] magiskboot unpack failed — ramdisk.cpio not found."
+            exit 1
+          }
+          echo "[+] vendor_boot unpacked."
+
+          # ── Samsung: normalize SRP board name ────────────────────────────
+          # Auto-detected: only fires if 'name=SRP' is present in the header.
+          # Prevents Samsung anti-downgrade board mismatch rejection at flash.
+          if [[ -f header ]] && grep -q 'name=SRP' header 2>/dev/null; then
+            sed -Ei 's/(name=SRP[[:alnum:]]*)[0-9]{3}/\1001/' header
+            echo "[+] SRP board name normalized."
+          fi
+
+          # ── Debug mode ────────────────────────────────────────────────────
+          if [[ "${{ env.BUILD_DEBUGGER }}" == "true" ]] && [[ -f header ]]; then
+            sed -i '2 s/$/ androidboot.selinux=permissive/' header
+            echo "[!] DEBUG: selinux=permissive appended to cmdline."
+          fi
+
+          # ── Replace DTB ───────────────────────────────────────────────────
+          # Unlike pack-process, we do NOT require GENERATE_DTB=true.
+          # After build-process, compiled .dtb files always exist in the
+          # dts/ output tree — we search and concatenate them directly,
+          # mirroring the approach used in the NovaKernel buildscript.
+          #
+          # IMPORTANT: we resolve the new DTB BEFORE deleting the stock one.
+          # Deleting first (old behaviour) left vendor_boot with no DTB at all
+          # if the search came up empty.
+          if [[ "${{ env.VENDOR_BOOT_DTB_REPLACE }}" == "true" ]]; then
+            if [[ -f dtb ]]; then
+              CHIP="${{ env.GENERATE_CHIP }}"
+              NEW_DTB=""
+
+              # Priority 0 — user-supplied explicit path (VENDOR_BOOT_DTB_SOURCE).
+              # Accepts any path relative to the repo root or an absolute path.
+              # Glob patterns are supported (e.g. "device_kernel/out/.../sm7325*.dtb").
+              if [[ -n "${{ env.VENDOR_BOOT_DTB_SOURCE }}" ]]; then
+                _user_src="$GITHUB_WORKSPACE/${{ env.VENDOR_BOOT_DTB_SOURCE }}"
+                # Expand glob in case the user specified a wildcard pattern.
+                _expanded=($(ls "$_user_src" 2>/dev/null || true))
+                if [[ ${#_expanded[@]} -eq 1 ]] && [[ -f "${_expanded[0]}" ]]; then
+                  NEW_DTB="${_expanded[0]}"
+                  echo "[+] DTB: using user-specified source → ${{ env.VENDOR_BOOT_DTB_SOURCE }}"
+                elif [[ ${#_expanded[@]} -gt 1 ]]; then
+                  cat "${_expanded[@]}" > "$WORK/dtb_user"
+                  NEW_DTB="$WORK/dtb_user"
+                  echo "[+] DTB: merged ${#_expanded[@]} file(s) from VENDOR_BOOT_DTB_SOURCE."
+                else
+                  echo "[!] VENDOR_BOOT_DTB_SOURCE set but no file found at: $_user_src"
+                  echo "    Falling through to automatic search."
+                fi
+              fi
+
+              # Priority 1 — pre-built single file (created by pack-process
+              # when GENERATE_DTB=true, or shipped by some kernels directly).
+              if [[ -z "$NEW_DTB" ]]; then
+                for _try in \
+                    "$IMAGE_DIR/dtb" \
+                    "$IMAGE_DIR/dtb.img" \
+                    "$GITHUB_WORKSPACE/device_kernel/dtb"; do
+                  if [[ -f "$_try" ]]; then
+                    NEW_DTB="$_try"
+                    echo "[+] DTB: found pre-built at $(basename $_try)."
+                    break
+                  fi
+                done
+              fi
+
+              # Priority 2 — concatenate compiled .dtb files from the build
+              # output tree. This is the standard path and works regardless
+              # of GENERATE_DTB. Search order: dts/vendor/<chip> → dts/<chip>.
+              if [[ -z "$NEW_DTB" ]] && [[ -n "$CHIP" ]]; then
+                for _dts_dir in \
+                    "$IMAGE_DIR/dts/vendor/$CHIP" \
+                    "$IMAGE_DIR/dts/$CHIP"; do
+                  if ls "$_dts_dir"/*.dtb &>/dev/null 2>&1; then
+                    cat "$_dts_dir"/*.dtb > "$WORK/dtb_new"
+                    NEW_DTB="$WORK/dtb_new"
+                    echo "[+] DTB: merged $(ls "$_dts_dir"/*.dtb 2>/dev/null | wc -l) file(s) from dts/$(basename $(dirname $_dts_dir))/$(basename $_dts_dir)/"
+                    break
+                  fi
+                done
+              fi
+
+              # Apply — only delete stock dtb when a replacement is confirmed.
+              if [[ -n "$NEW_DTB" ]]; then
+                rm dtb
+                cp "$NEW_DTB" dtb
+                echo "[+] DTB replaced → $(du -h dtb | cut -f1)."
+              else
+                echo "[!] VENDOR_BOOT_DTB_REPLACE: no compiled .dtb files found."
+                echo "    Options:"
+                echo "    • Set VENDOR_BOOT_DTB_SOURCE to the exact .dtb path in your repo."
+                echo "    • Set GENERATE_CHIP to the correct SoC family (qcom/mediatek)."
+                echo "    Keeping stock DTB."
+              fi
+            else
+              echo "[!] VENDOR_BOOT_DTB_REPLACE: vendor_boot has no dtb section. Skipping."
+            fi
+          fi
+
+          # ── cpio operation builder ────────────────────────────────────────
+          declare -a CPIO_TODO=()
+          declare -A SEEN_DIRS=()
+
+          # Add a mkdir command once per unique path (deduplication guard).
+          _mkdir_once() {
+            [[ -z "${SEEN_DIRS[$1]+x}" ]] || return 0
+            CPIO_TODO+=("mkdir 0755 $1")
+            SEEN_DIRS["$1"]=1
+          }
+
+          # ── Multi-FS fstab patch ──────────────────────────────────────────
+          # Rewrites each partition entry to accept erofs / ext4 / f2fs so the
+          # same vendor_boot boots any ROM regardless of filesystem choice.
+          # fstab filename is auto-detected — works for fstab.qcom, fstab.mt6983,
+          # fstab.exynos*, etc. without any hardcoded SoC-specific variable.
+          if [[ "${{ env.VENDOR_BOOT_FSTAB_MULTIFS }}" == "true" ]]; then
+            mkdir -p ramdisk_peek
+            (cd ramdisk_peek && $MAGISKBOOT cpio ../ramdisk.cpio "extract") &>/dev/null || true
+
+            FSTAB_PATH=$(find ramdisk_peek/first_stage_ramdisk \
+                           -maxdepth 1 -name "fstab.*" 2>/dev/null | head -1)
+            rm -rf ramdisk_peek
+
+            if [[ -n "$FSTAB_PATH" ]]; then
+              FSTAB_NAME=$(basename "$FSTAB_PATH")
+
+              # Re-extract just the fstab into our work dir for patching
+              $MAGISKBOOT cpio ramdisk.cpio \
+                "extract first_stage_ramdisk/${FSTAB_NAME} fstab.orig" &>/dev/null
+
+              awk '
+                BEGIN { OFS = "\t" }
+                /^(system|vendor|product|odm)[[:space:]]/ && !seen[$1]++ {
+                  rest = $4
+                  for (i = 5; i <= NF; i++) rest = rest "\t" $i
+                  for (i = 1; i <= 3; i++)
+                    print $1, $2, (i==1 ? "erofs" : i==2 ? "ext4" : "f2fs"), rest
+                  next
+                }
+                { print }
+              ' fstab.orig > fstab.patched
+
+              CPIO_TODO+=("rm first_stage_ramdisk/${FSTAB_NAME}")
+              CPIO_TODO+=("add 0644 first_stage_ramdisk/${FSTAB_NAME} $WORK/fstab.patched")
+              echo "[+] fstab multi-fs patch ready: ${FSTAB_NAME} → erofs/ext4/f2fs."
+            else
+              echo "[!] VENDOR_BOOT_FSTAB_MULTIFS: no fstab.* in first_stage_ramdisk. Skipping."
+            fi
+          fi
+
+          # ── Firmware injection ────────────────────────────────────────────
+          # Injects every file from Firmwares/<DEVICE_CODENAME>/ preserving the
+          # subdirectory structure under lib/firmware/ inside the ramdisk.
+          # mkdir commands are deduplicated automatically via _mkdir_once().
+          if [[ "${{ env.VENDOR_BOOT_FIRMWARE_ENABLE }}" == "true" ]]; then
+            FW_ROOT="/tmp/Firmwares/${{ env.DEVICE_CODENAME }}"
+            if [[ -d "$FW_ROOT" ]]; then
+              _mkdir_once "lib/firmware"
+              FW_COUNT=0
+              while IFS= read -r -d '' fw_file; do
+                rel="${fw_file#${FW_ROOT}/}"           # e.g. tsp_synaptics/s3908_a73xq_boe.bin
+                fw_subdir=$(dirname "$rel")
+                [[ "$fw_subdir" != "." ]] && _mkdir_once "lib/firmware/$fw_subdir"
+                CPIO_TODO+=("add 0644 lib/firmware/${rel} ${fw_file}")
+                echo "    [fw] lib/firmware/$rel"
+                (( FW_COUNT++ )) || true
+              done < <(find "$FW_ROOT" -type f -print0 | sort -z)
+              echo "[+] Firmware: $FW_COUNT file(s) queued."
+            else
+              echo "[!] VENDOR_BOOT_FIRMWARE_ENABLE: /tmp/Firmwares/${{ env.DEVICE_CODENAME }} not found."
+              echo "    Make sure Firmwares/${{ env.DEVICE_CODENAME }}/ exists in your repository root."
+            fi
+          fi
+
+          # ── Kernel modules (.ko) injection ───────────────────────────────
+          # Replaces lib/modules in the ramdisk wholesale with:
+          #   • stripped .ko files (debug symbols removed via llvm-strip/strip)
+          #   • modules.dep / modules.alias / modules.softdep  (generated by depmod)
+          #   • modules.order  (from kernel build output, if present)
+          if [[ "${{ env.VENDOR_BOOT_MODULES_INJECT }}" == "true" ]]; then
+            mapfile -d '' KO_FILES < <(
+              find "$GITHUB_WORKSPACE/device_kernel/out/" -name "*.ko" -print0 2>/dev/null | sort -z
+            )
+            if [[ ${#KO_FILES[@]} -gt 0 ]]; then
+
+              # ── Detect strip tool (prefer llvm-strip from clang toolchain) ─
+              if [[ -f "$GITHUB_WORKSPACE/clang-custom/bin/llvm-strip" ]]; then
+                STRIP_BIN="$GITHUB_WORKSPACE/clang-custom/bin/llvm-strip"
+              else
+                STRIP_BIN="strip"
+              fi
+              echo "[*] Strip tool: $STRIP_BIN"
+
+              # ── Resolve kernel release string for depmod ──────────────────
+              # Prefer the authoritative file written by the build system.
+              # Fall back to make kernelrelease if the file doesn't exist yet.
+              KVER=$(cat "$GITHUB_WORKSPACE/device_kernel/out/include/config/kernel.release" 2>/dev/null) \
+                || KVER=$(make -s -C "$GITHUB_WORKSPACE/device_kernel/" \
+                              O="$GITHUB_WORKSPACE/device_kernel/out" \
+                              ARCH="${{ env.KERNEL_ARCH }}" kernelrelease 2>/dev/null) \
+                || KVER=""
+              echo "[*] Kernel release for depmod: ${KVER:-unknown}"
+
+              # ── Strip .ko into a staging dir ──────────────────────────────
+              MODS_STAGING="$WORK/mods_staging"
+              mkdir -p "$MODS_STAGING"
+              for ko_file in "${KO_FILES[@]}"; do
+                ko_name=$(basename "$ko_file")
+                cp "$ko_file" "$MODS_STAGING/$ko_name"
+                $STRIP_BIN --strip-debug "$MODS_STAGING/$ko_name" 2>/dev/null || true
+              done
+              echo "[+] Stripped ${#KO_FILES[@]} .ko file(s)."
+
+              # ── Generate module metadata via depmod ───────────────────────
+              if [[ -n "$KVER" ]]; then
+                DEPMOD_BASE="$WORK/depmod_base"
+                mkdir -p "$DEPMOD_BASE/lib/modules/$KVER"
+                cp "$MODS_STAGING/"*.ko "$DEPMOD_BASE/lib/modules/$KVER/" 2>/dev/null || true
+                depmod -b "$DEPMOD_BASE" "$KVER" 2>/dev/null || true
+                echo "[+] depmod: metadata generated for $KVER"
+              fi
+
+              # ── Queue cpio operations ─────────────────────────────────────
+              CPIO_TODO+=("rm -r lib/modules")
+              _mkdir_once "lib/modules"
+
+              # stripped .ko files
+              for ko_file in "${KO_FILES[@]}"; do
+                ko_name=$(basename "$ko_file")
+                CPIO_TODO+=("add 0644 lib/modules/$ko_name $MODS_STAGING/$ko_name")
+              done
+
+              # depmod-generated metadata: modules.dep / modules.alias / modules.softdep
+              if [[ -n "$KVER" ]]; then
+                for meta in modules.dep modules.alias modules.softdep; do
+                  meta_file="$DEPMOD_BASE/lib/modules/$KVER/$meta"
+                  if [[ -f "$meta_file" ]]; then
+                    CPIO_TODO+=("add 0644 lib/modules/$meta $meta_file")
+                    echo "    [meta] $meta"
+                  fi
+                done
+              fi
+
+              # modules.order comes from the kernel build system, not depmod
+              ORDER_SRC="$GITHUB_WORKSPACE/device_kernel/out/modules.order"
+              if [[ -f "$ORDER_SRC" ]]; then
+                CPIO_TODO+=("add 0644 lib/modules/modules.order $ORDER_SRC")
+                echo "    [meta] modules.order (from build output)"
+              fi
+
+              echo "[+] Modules: ${#KO_FILES[@]} .ko file(s) queued (kernel: ${KVER:-unknown})."
+            else
+              echo "[!] VENDOR_BOOT_MODULES_INJECT: no .ko files found in out/. Skipping."
+            fi
+          fi
+
+          # ── Apply all cpio operations in one atomic call ──────────────────
+          if [[ ${#CPIO_TODO[@]} -gt 0 ]]; then
+            echo "[*] Applying ${#CPIO_TODO[@]} cpio operation(s)..."
+            $MAGISKBOOT cpio ramdisk.cpio "${CPIO_TODO[@]}"
+            echo "[+] ramdisk modified."
+          else
+            echo "[!] No cpio operations queued — ramdisk is stock."
+          fi
+
+          # ── Repack ───────────────────────────────────────────────────────
+          $MAGISKBOOT repack vendor_boot.img "$OUT"
+          echo "[+] Repacked → $(basename "$OUT") ($(du -h "$OUT" | cut -f1))"
+
+          # ── Cleanup ───────────────────────────────────────────────────────
+          cd "$GITHUB_WORKSPACE"
+          rm -rf "$WORK" "$STOCK"
+
+          echo "VENDOR_BOOT_IMAGE=$OUT" >> $GITHUB_ENV
+          echo "[+] vendor_boot.img repack complete."
