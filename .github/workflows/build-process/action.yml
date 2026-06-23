@@ -35,7 +35,12 @@ runs:
           if [ -n "${{ env.CLANG_SOURCE }}" ]; then
             export PATH=$GITHUB_WORKSPACE/clang-custom/bin:$PATH
           fi
-          KERNEL_RELEASE=$(make -s O=out ARCH="${{ env.KERNEL_ARCH }}" ${{ env.CUSTOM_CMDS }} ${{ env.EXTRA_CMDS }} kernelrelease 2>/dev/null)
+          # mkdir -p out: make kernelrelease with O=out fails on some kernel
+          # versions when the output directory doesn't exist yet.
+          mkdir -p out
+          KERNEL_RELEASE=$(make -s O=out ARCH="${{ env.KERNEL_ARCH }}" ${{ env.CUSTOM_CMDS }} ${{ env.EXTRA_CMDS }} kernelrelease 2>/dev/null) \
+              || KERNEL_RELEASE=$(make -s ARCH="${{ env.KERNEL_ARCH }}" kernelrelease 2>/dev/null) \
+              || KERNEL_RELEASE="unknown"
           echo "==============================="
           echo "= Kernel name is $KERNEL_RELEASE"
           echo "==============================="
