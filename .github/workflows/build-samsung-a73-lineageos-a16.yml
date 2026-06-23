@@ -92,16 +92,18 @@ env:
   # Vendor Boot Repack
   VENDOR_BOOT_REPACK_ENABLE: "true"
   VENDOR_BOOT_SOURCE: "https://github.com/OmarAlsmehan/proprietary_vendor_samsung_a73xq/releases/download/Vendor_boot.img/vendor_boot.img.lz4"
-  VENDOR_BOOT_SOC: "qcom"             # SM7325 = Snapdragon 778G (reserved for future logic).
-  VENDOR_BOOT_DTB_REPLACE: "true"     # Replace DTB inside vendor_boot with compiled one.
-  VENDOR_BOOT_FSTAB_MULTIFS: "true"   # Rewrite fstab to accept erofs + ext4 + f2fs.
-  VENDOR_BOOT_MODULES_INJECT: "true"  # Inject compiled .ko into lib/modules.
-  VENDOR_BOOT_FIRMWARE_ENABLE: "true" # Inject firmware from Firmwares/a73xq/ in repo root.
+  VENDOR_BOOT_SOC: "qcom"
+  VENDOR_BOOT_DTB_REPLACE: "true"     
+  VENDOR_BOOT_DTB_SOURCE: "$GITHUB_WORKSPACE/device_kernel/out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb"
+  VENDOR_BOOT_FSTAB_MULTIFS: "true"  
+  VENDOR_BOOT_MODULES_INJECT: "true"  
+  VENDOR_BOOT_FIRMWARE_ENABLE: "true" 
 
 jobs:
   build-kernel:
     name: Galaxy A73 5G (LineageOS 23.2 A16)
-    runs-on: ubuntu-latest 
+    runs-on: ubuntu-latest # u can changed to ubuntu 22.04, and need container set ubuntu-latest
+    # container: archlinux/archlinux:latest # if u need use arch linux -> archlinux/archlinux:latest or ubuntu 20.04 -> ubuntu:focal
     env:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"

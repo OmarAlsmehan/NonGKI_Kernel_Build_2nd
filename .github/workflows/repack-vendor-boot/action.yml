@@ -158,27 +158,81 @@ runs:
           fi
 
           # ── Replace DTB ───────────────────────────────────────────────────
-          # Reuses GENERATE_CHIP/GENERATE_DTB from the existing pack-process
-          # convention so no new variables are required for DTB generation.
+          # Unlike pack-process, we do NOT require GENERATE_DTB=true.
+          # After build-process, compiled .dtb files always exist in the
+          # dts/ output tree — we search and concatenate them directly,
+          # mirroring the approach used in the NovaKernel buildscript.
+          #
+          # IMPORTANT: we resolve the new DTB BEFORE deleting the stock one.
+          # Deleting first (old behaviour) left vendor_boot with no DTB at all
+          # if the search came up empty.
           if [[ "${{ env.VENDOR_BOOT_DTB_REPLACE }}" == "true" ]]; then
             if [[ -f dtb ]]; then
-              rm dtb
-              if   [[ -f "$IMAGE_DIR/dtb"     ]]; then
-                cp "$IMAGE_DIR/dtb" dtb && echo "[+] DTB replaced (dtb)."
-              elif [[ -f "$IMAGE_DIR/dtb.img" ]]; then
-                cp "$IMAGE_DIR/dtb.img" dtb && echo "[+] DTB replaced (dtb.img)."
-              elif [[ "${{ env.GENERATE_DTB }}" == "true" ]]; then
-                CHIP="${{ env.GENERATE_CHIP }}"
-                if   ls "$IMAGE_DIR/dts/$CHIP"/*.dtb        &>/dev/null; then
-                  cat "$IMAGE_DIR/dts/$CHIP"/*.dtb        > dtb
-                elif ls "$IMAGE_DIR/dts/vendor/$CHIP"/*.dtb &>/dev/null; then
-                  cat "$IMAGE_DIR/dts/vendor/$CHIP"/*.dtb > dtb
+              CHIP="${{ env.GENERATE_CHIP }}"
+              NEW_DTB=""
+
+              # Priority 0 — user-supplied explicit path (VENDOR_BOOT_DTB_SOURCE).
+              # Accepts any path relative to the repo root or an absolute path.
+              # Glob patterns are supported (e.g. "device_kernel/out/.../sm7325*.dtb").
+              if [[ -n "${{ env.VENDOR_BOOT_DTB_SOURCE }}" ]]; then
+                _user_src="$GITHUB_WORKSPACE/${{ env.VENDOR_BOOT_DTB_SOURCE }}"
+                # Expand glob in case the user specified a wildcard pattern.
+                _expanded=($(ls $_user_src 2>/dev/null))
+                if [[ ${#_expanded[@]} -eq 1 ]] && [[ -f "${_expanded[0]}" ]]; then
+                  NEW_DTB="${_expanded[0]}"
+                  echo "[+] DTB: using user-specified source → ${{ env.VENDOR_BOOT_DTB_SOURCE }}"
+                elif [[ ${#_expanded[@]} -gt 1 ]]; then
+                  cat "${_expanded[@]}" > "$WORK/dtb_user"
+                  NEW_DTB="$WORK/dtb_user"
+                  echo "[+] DTB: merged ${#_expanded[@]} file(s) from VENDOR_BOOT_DTB_SOURCE."
                 else
-                  echo "[!] VENDOR_BOOT_DTB_REPLACE: no .dtb files found. Skipping."
+                  echo "[!] VENDOR_BOOT_DTB_SOURCE set but no file found at: $_user_src"
+                  echo "    Falling through to automatic search."
                 fi
-                [[ -f dtb ]] && echo "[+] DTB generated and replaced ($CHIP)."
+              fi
+
+              # Priority 1 — pre-built single file (created by pack-process
+              # when GENERATE_DTB=true, or shipped by some kernels directly).
+              if [[ -z "$NEW_DTB" ]]; then
+                for _try in \
+                    "$IMAGE_DIR/dtb" \
+                    "$IMAGE_DIR/dtb.img" \
+                    "$GITHUB_WORKSPACE/device_kernel/dtb"; do
+                  if [[ -f "$_try" ]]; then
+                    NEW_DTB="$_try"
+                    echo "[+] DTB: found pre-built at $(basename $_try)."
+                    break
+                  fi
+                done
+              fi
+
+              # Priority 2 — concatenate compiled .dtb files from the build
+              # output tree. This is the standard path and works regardless
+              # of GENERATE_DTB. Search order: dts/vendor/<chip> → dts/<chip>.
+              if [[ -z "$NEW_DTB" ]] && [[ -n "$CHIP" ]]; then
+                for _dts_dir in \
+                    "$IMAGE_DIR/dts/vendor/$CHIP" \
+                    "$IMAGE_DIR/dts/$CHIP"; do
+                  if ls "$_dts_dir"/*.dtb &>/dev/null 2>&1; then
+                    cat "$_dts_dir"/*.dtb > "$WORK/dtb_new"
+                    NEW_DTB="$WORK/dtb_new"
+                    echo "[+] DTB: merged $(ls "$_dts_dir"/*.dtb 2>/dev/null | wc -l) file(s) from dts/$(basename $(dirname $_dts_dir))/$(basename $_dts_dir)/"
+                    break
+                  fi
+                done
+              fi
+
+              # Apply — only delete stock dtb when a replacement is confirmed.
+              if [[ -n "$NEW_DTB" ]]; then
+                rm dtb
+                cp "$NEW_DTB" dtb
+                echo "[+] DTB replaced → $(du -h dtb | cut -f1)."
               else
-                echo "[!] VENDOR_BOOT_DTB_REPLACE: no DTB source available. Skipping."
+                echo "[!] VENDOR_BOOT_DTB_REPLACE: no compiled .dtb files found."
+                echo "    Options:"
+                echo "    • Set VENDOR_BOOT_DTB_SOURCE to the exact .dtb path in your repo."
+                echo "    • Set GENERATE_CHIP to the correct SoC family (qcom/mediatek)."
+                echo "    Keeping stock DTB."
               fi
             else
               echo "[!] VENDOR_BOOT_DTB_REPLACE: vendor_boot has no dtb section. Skipping."
