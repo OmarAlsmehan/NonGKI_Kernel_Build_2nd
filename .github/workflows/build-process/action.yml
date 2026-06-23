@@ -28,6 +28,18 @@ runs:
           key: build-kernel-${{ env.DEVICE_NAME }}${{ env.UPLOADNAME }}
           max-size: 2G
 
+      - name: Kernel Release
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel/
+          if [ -n "${{ env.CLANG_SOURCE }}" ]; then
+            export PATH=$GITHUB_WORKSPACE/clang-custom/bin:$PATH
+          fi
+          KERNEL_RELEASE=$(make -s O=out ARCH="${{ env.KERNEL_ARCH }}" ${{ env.CUSTOM_CMDS }} ${{ env.EXTRA_CMDS }} kernelrelease 2>/dev/null)
+          echo "==============================="
+          echo "= Kernel name is $KERNEL_RELEASE"
+          echo "==============================="
+
       - name: Build Kernel
         shell: bash
         run: |
