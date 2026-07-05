@@ -10,7 +10,7 @@ env:
   DEVICE_CODENAME : "a73xq"
 
   CUSTOM_CMDS : "ARCH=arm64"
-  EXTRA_CMDS : "LLVM=1 LLVM_IAS=1 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi-"
+  EXTRA_CMDS : "LLVM=1"
 
   KERNEL_SOURCE : "https://github.com/OmarAlsmehan/android_kernel_samsung_sm7325.git"
   KERNEL_BRANCH : "clo2"
@@ -25,7 +25,7 @@ env:
   GCC_32_BRANCH : ""
 
   DEFCONFIG_SOURCE: ""
-  DEFCONFIG_NAME : "vendor/lineage-a73xq_defconfig"
+  DEFCONFIG_NAME : "gki_defconfig"
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
@@ -90,7 +90,7 @@ env:
   FREE_MORE_SPACE: "false" # if u want get more space, enabled it.
 
   # Vendor Boot Repack
-  VENDOR_BOOT_REPACK_ENABLE: "true"    # Use it if your kernel need modules (.ko) currently only for msm-5.4
+  VENDOR_BOOT_REPACK_ENABLE: "false"    # Use it if your kernel need modules (.ko) currently only for msm-5.4
   VENDOR_BOOT_SOURCE: "https://github.com/OmarAlsmehan/proprietary_vendor_samsung_a73xq/releases/download/Vendor_boot.img/vendor_boot.img.lz4" # your vendor_boot.img link 
   VENDOR_BOOT_SOC: "qcom"
   VENDOR_BOOT_DTB_REPLACE: "true"  # this to replace your old dtb in the vendor_boot.img
