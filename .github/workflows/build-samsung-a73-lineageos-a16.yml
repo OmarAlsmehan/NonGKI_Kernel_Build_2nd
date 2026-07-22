@@ -25,7 +25,7 @@ env:
   GCC_32_BRANCH : ""
 
   DEFCONFIG_SOURCE: ""
-  DEFCONFIG_NAME : "nova_defconfig"
+  DEFCONFIG_NAME : "gki_defconfig nova_defconfig"
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
@@ -124,13 +124,22 @@ jobs:
 
       - name: 🔗 Patch for no-kprobe
         uses: ./.github/workflows/patch-no-kprobe
-
+        
+      - name: 🪛 Extra Kernel Options
+        shell: bash
+        run: |
+           git config --global user.name "Omar Smehan"
+           git config --global user.email "omarsmehan890@gmail.com"
+           cd $GITHUB_WORKSPACE/device_kernel
+           git add .
+           git commit -m "fix dirty name"
+        
       - name: 🪛 Extra Kernel Options
         shell: bash
         run: |
            cd $GITHUB_WORKSPACE/device_kernel
            echo -e "\033[1;37mKernel Version: $(make -s kernelversion)\033[0m"
-
+           
       - name: 🚀 Build Process
         uses: ./.github/workflows/build-process
 
