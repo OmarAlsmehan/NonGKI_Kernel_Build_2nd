@@ -15,7 +15,7 @@ env:
   KERNEL_SOURCE : "https://github.com/OmarAlsmehan/Nova-Kernel.git"
   KERNEL_BRANCH : "aosp_test"
 
-  CLANG_SOURCE : "https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r563880c-13989888/clang-r563880c.tar.gz"
+  CLANG_SOURCE : "https://github.com/OmarAlsmehan/Download-Resumer/releases/download/dl-linux-x86-refsheadsmirror-goog-main-llvm-toolchain-source-clang-r584948.tar.gz-20260726-1941/linux-x86-refsheadsmirror-goog-main-llvm-toolchain-source-clang-r584948.tar.gz"
   CLANG_BRANCH : ""
 
   GCC_GNU : false
@@ -85,7 +85,7 @@ env:
   SKIP_PATCH: "false" # Ignore errors found in Patch Debugger.
 
   BUILD_OTHER_CONFIG: "false" # Merge config files.
-  MERGE_CONFIG_FILES: "nova_defconfig"
+  MERGE_CONFIG_FILES: "a73xq.config"
 
   FREE_MORE_SPACE: "false" # if u want get more space, enabled it.
 
