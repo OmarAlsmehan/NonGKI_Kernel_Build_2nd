@@ -15,7 +15,7 @@ env:
   KERNEL_SOURCE : "https://github.com/OmarAlsmehan/Nova-Kernel.git"
   KERNEL_BRANCH : "mck"
 
-  CLANG_SOURCE : "https://github.com/OmarAlsmehan/Download-Resumer/releases/download/dl-linux-x86-refsheadsmirror-goog-main-llvm-toolchain-source-clang-r584948.tar.gz-20260726-1941/linux-x86-refsheadsmirror-goog-main-llvm-toolchain-source-clang-r584948.tar.gz"
+  CLANG_SOURCE : "https://github.com/bachnxuan/aosp_clang_mirror/releases/download/clang-r596125-15682573/clang-r596125.tar.gz"
   CLANG_BRANCH : ""
 
   GCC_GNU : false
