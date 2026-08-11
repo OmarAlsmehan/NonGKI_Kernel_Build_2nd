@@ -13,7 +13,7 @@ env:
   EXTRA_CMDS : "LLVM=1"
 
   KERNEL_SOURCE : "https://github.com/OmarAlsmehan/Nova-Kernel.git"
-  KERNEL_BRANCH : "aosp_test"
+  KERNEL_BRANCH : "mck"
 
   CLANG_SOURCE : "https://github.com/OmarAlsmehan/Download-Resumer/releases/download/dl-linux-x86-refsheadsmirror-goog-main-llvm-toolchain-source-clang-r584948.tar.gz-20260726-1941/linux-x86-refsheadsmirror-goog-main-llvm-toolchain-source-clang-r584948.tar.gz"
   CLANG_BRANCH : ""
@@ -25,7 +25,7 @@ env:
   GCC_32_BRANCH : ""
 
   DEFCONFIG_SOURCE: ""
-  DEFCONFIG_NAME : "nova_defconfig"
+  DEFCONFIG_NAME : "lineage-a73xq_defconfig"
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
@@ -97,7 +97,7 @@ env:
   VENDOR_BOOT_DTB_SOURCE: "device_kernel/out/arch/arm64/boot/dts/vendor/qcom/yupik.dtb" # dtb direct in kernel source
   VENDOR_BOOT_FSTAB_MULTIFS: "true"  # multi file system support like (Erofs, F2fs, exte4, etc) 
   VENDOR_BOOT_MODULES_INJECT: "true"  
-  VENDOR_BOOT_FIRMWARE_ENABLE: "true" # Inject firmware into the vendor_boot.img
+  VENDOR_BOOT_FIRMWARE_ENABLE: "false" # Inject firmware into the vendor_boot.img
 
 jobs:
   build-kernel:
